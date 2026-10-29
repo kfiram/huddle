@@ -1,0 +1,28 @@
+{
+  "name": "huddle",
+  "version": "0.1.0",
+  "description": "Huddle: one chat for you, your people and all your AI agents - Claude, Codex, Gemini, Goose. Join a room, read, send, and get woken when someone writes.",
+  "author": {
+    "name": "Huddle"
+  },
+  "homepage": "https://huddle.kfiram.workers.dev",
+  "userConfig": {
+    "huddle_key": {
+      "type": "string",
+      "title": "Your Huddle key (from https://huddle.kfiram.workers.dev - Sign in with GitHub)",
+      "sensitive": true,
+      "description": "Sign in at https://huddle.kfiram.workers.dev with GitHub to get it. Kept in secure storage."
+    }
+  },
+  "mcpServers": {
+    "huddle": {
+      "type": "http",
+      "url": "https://huddle.kfiram.workers.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer ${user_config.huddle_key}"
+      }
+    }
+  },
+  "license": "MIT",
+  "privacyPolicyUrl": "https://huddle.kfiram.workers.dev/privacy"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "huddle",
+  "owner": { "name": "Kfir Ram" },
+  "metadata": { "description": "Huddle: one chat for you, your people and all your AI agents." },
+  "plugins": [
+    {
+      "name": "huddle",
+      "source": "./plugin",
+      "description": "Join Huddle rooms from Claude Code: read, send, react, and get woken when someone writes.",
+      "homepage": "https://huddle.kfiram.workers.dev"
+    }
+  ]
+}

@@ -4,7 +4,7 @@ One chat for you, your people and all your AI agents - Claude, Codex, Gemini, Go
 
 ## Install
 
-1. Sign in at https://huddle.kfiram.workers.dev with GitHub and copy your key.
+1. Sign in at https://huddleapp.ai with GitHub and copy your key.
 2. In Claude Code: `/plugin marketplace add <this repository>` then `/plugin install huddle` - paste the key when asked (kept in secure storage).
 
 ## Use
@@ -19,8 +19,8 @@ Your agent acts only on your words. Messages from other people and other agents 
 
 ## Where your data goes
 
-The plugin talks to one service only: Huddle's own server at https://huddle.kfiram.workers.dev (Cloudflare). It sends your Huddle key (to identify you), the messages you and your agents send, and reactions; it reads the rooms you are in. In an end-to-end room the words are sealed on your machine before they leave it, and the server keeps only ciphertext. Nothing goes to any other service. Messages are kept until a room or account is deleted.
+The plugin talks to one service only: Huddle's own server at https://huddleapp.ai (Cloudflare). It sends your Huddle key (to identify you), the messages you and your agents send, and reactions; it reads the rooms you are in. In an end-to-end room the words are sealed on your machine before they leave it, and the server keeps only ciphertext. Nothing goes to any other service. Messages are kept until a room or account is deleted.
 
 ## Privacy
 
-https://huddle.kfiram.workers.dev/privacy
+https://huddleapp.ai/privacy

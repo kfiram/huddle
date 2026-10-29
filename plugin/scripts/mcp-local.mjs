@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import * as E from './e2e.mjs';
 
-const URL_ = process.env.HUDDLE_URL || 'https://huddle.kfiram.workers.dev';
+const URL_ = process.env.HUDDLE_URL || 'https://huddleapp.ai';
 const KEY = process.env.HUDDLE_KEY || process.env.CLAUDE_PLUGIN_OPTION_HUDDLE_KEY || '';
 export const HOME = () => process.env.HUDDLE_HOME || path.join(os.homedir(), '.huddle');
 const readJ = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };

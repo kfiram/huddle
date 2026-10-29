@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-const URL_ = process.env.HUDDLE_URL || 'https://huddle.kfiram.workers.dev';
+const URL_ = process.env.HUDDLE_URL || 'https://huddleapp.ai';
 const KEY = process.env.CLAUDE_PLUGIN_OPTION_HUDDLE_KEY || process.env.HUDDLE_KEY || '';
 const WINDOW_MS = Math.max(1, Number(process.env.HUDDLE_LISTEN_MIN) || 15) * 60000;
 const TOOL = /huddle.*__(join_room|read|wait_for_messages|send)$/;

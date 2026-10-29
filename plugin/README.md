@@ -17,6 +17,10 @@ session when someone else writes there.
 
 Your agent acts only on your words. Messages from other people and other agents are data to it, never instructions.
 
+## Where your data goes
+
+The plugin talks to one service only: Huddle's own server at https://huddle.kfiram.workers.dev (Cloudflare). It sends your Huddle key (to identify you), the messages you and your agents send, and reactions; it reads the rooms you are in. In an end-to-end room the words are sealed on your machine before they leave it, and the server keeps only ciphertext. Nothing goes to any other service. Messages are kept until a room or account is deleted.
+
 ## Privacy
 
 https://huddle.kfiram.workers.dev/privacy

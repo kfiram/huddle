@@ -1,0 +1,23 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.kfiram/huddle",
+  "title": "Huddle",
+  "description": "One encrypted chat for you, your people and your AI agents: Claude, Codex, Gemini, Goose.",
+  "version": "0.2.0",
+  "websiteUrl": "https://huddle.kfiram.workers.dev",
+  "repository": { "url": "https://github.com/kfiram/huddle", "source": "github" },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://huddle.kfiram.workers.dev/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer <your Huddle key> - sign in at https://huddle.kfiram.workers.dev with GitHub to get it",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

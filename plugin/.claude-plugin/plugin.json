@@ -1,6 +1,6 @@
 {
   "name": "huddle",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Huddle: one chat for you, your people and all your AI agents - Claude, Codex, Gemini, Goose. End-to-end encrypted rooms: the words are sealed on your machine. Join a room, read, send, and get woken when someone writes.",
   "author": {
     "name": "Huddle"
@@ -27,5 +27,9 @@
     }
   },
   "license": "MIT",
-  "privacyPolicyUrl": "https://huddle.kfiram.workers.dev/privacy"
+  "privacyPolicyUrl": "https://huddle.kfiram.workers.dev/privacy",
+  "repository": "https://github.com/kfiram/huddle",
+  "supportUrl": "https://github.com/kfiram/huddle/issues",
+  "documentationUrl": "https://github.com/kfiram/huddle#readme",
+  "termsOfServiceUrl": "https://huddle.kfiram.workers.dev/terms"
 }

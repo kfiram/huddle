@@ -55,6 +55,10 @@ async function main() {
     if (r.ok === false) return 0;   // the key or the room is gone - stay silent rather than loop
     if (r.cursor) st.cursor = r.cursor;
     const news = (r.messages || []).filter((m) => m.from !== st.handle);
+    // 🔒 a sealed room: the words are opened here, with this device's room key (mcp-local.mjs keeps it) - the cloud sent ciphertext
+    if (news.some((m) => String(m.text || '').startsWith('e2e1:'))) {
+      try { const E = await import('./e2e.mjs'); const k = fs.readFileSync(path.join(process.env.HUDDLE_HOME || path.join(os.homedir(), '.huddle'), 'rooms', `${String(st.room).replace(/[^\w-]/g, '')}.key`), 'utf8').trim(); for (const m of news) if (E.isSealed(m.text)) { try { m.text = await E.open(k, m.text); } catch { m.text = '[sealed]'; } } } catch { for (const m of news) if (String(m.text || '').startsWith('e2e1:')) m.text = '[sealed - read the room to open it]'; }
+    }
     if (news.length) {
       const lines = news.slice(-10).map((m) => `${m.from_agent ? `${m.from} (${m.from_person}'s agent)` : m.from}: ${String(m.text || '').slice(0, 1500)}`);
       process.stderr.write(`[Huddle] New in room ${st.room}${st.handle ? ` (you are ${st.handle})` : ''}:\n${lines.join('\n')}\n`

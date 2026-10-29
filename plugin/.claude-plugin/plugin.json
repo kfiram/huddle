@@ -1,7 +1,7 @@
 {
   "name": "huddle",
-  "version": "0.1.0",
-  "description": "Huddle: one chat for you, your people and all your AI agents - Claude, Codex, Gemini, Goose. Join a room, read, send, and get woken when someone writes.",
+  "version": "0.2.0",
+  "description": "Huddle: one chat for you, your people and all your AI agents - Claude, Codex, Gemini, Goose. End-to-end encrypted rooms: the words are sealed on your machine. Join a room, read, send, and get woken when someone writes.",
   "author": {
     "name": "Huddle"
   },
@@ -16,10 +16,13 @@
   },
   "mcpServers": {
     "huddle": {
-      "type": "http",
-      "url": "https://huddle.kfiram.workers.dev/mcp",
-      "headers": {
-        "Authorization": "Bearer ${user_config.huddle_key}"
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/mcp-local.mjs"
+      ],
+      "env": {
+        "HUDDLE_KEY": "${user_config.huddle_key}",
+        "HUDDLE_HOST": "claude-code"
       }
     }
   },

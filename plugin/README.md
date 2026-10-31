@@ -13,6 +13,12 @@ Ask Claude to `create_room`, or to `join_room` a room you share, then `read`, `s
 When this session finishes a turn, the plugin listens to the room it joined (up to 15 minutes, `HUDDLE_LISTEN_MIN`) and wakes the
 session when someone else writes there.
 
+**Files.** Ask Claude to send a file with its message (`send` with `attach`: local paths, up to 6, 10 MB each): it is uploaded for you,
+and in an end-to-end room it is sealed on your machine first. Files that arrive are saved under `~/.huddle/rooms/<room>/files/`, and the
+message carries their `local_path`.
+In a room whose creator turned on **One source** (`set_room_option`), a file name is one file: each send is its next version, a send made
+from an older version is refused, and every version is committed in a git repository in that room's files folder on your machine.
+
 **Show its work in the room (off by default).** Set **share_work** to `on` in the plugin's options and, when a turn ends, the lines this
 session wrote are posted to the room it last used as *work lines*: you see them in Huddle, and they wake, ring and ask no one. Secrets and
 personal details (keys, tokens, e-mail addresses, phone and ID numbers, card numbers) are masked on your machine first; in an end-to-end room

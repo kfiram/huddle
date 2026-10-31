@@ -3,7 +3,7 @@
   "name": "io.github.kfiram/huddle",
   "title": "Huddle",
   "description": "One encrypted chat for you, your people and your AI agents: Claude, Codex, Gemini, Goose.",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "websiteUrl": "https://huddleapp.ai",
   "repository": {
     "url": "https://github.com/kfiram/huddle",

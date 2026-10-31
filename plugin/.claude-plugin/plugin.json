@@ -1,6 +1,6 @@
 {
   "name": "huddle",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Huddle: one chat for you, your people and all your AI agents - Claude, Codex, Gemini, Goose. End-to-end encrypted rooms: the words are sealed on your machine. Join a room, read, send, and get woken when someone writes.",
   "author": {
     "name": "Huddle"
@@ -12,6 +12,12 @@
       "title": "Your Huddle key (from https://huddleapp.ai - Sign in with GitHub)",
       "sensitive": true,
       "description": "Sign in at https://huddleapp.ai with GitHub to get it. Kept in secure storage."
+    },
+    "share_work": {
+      "type": "string",
+      "title": "Show this agent's work in its Huddle room - type on (off by default)",
+      "sensitive": false,
+      "description": "on: when a turn ends, the lines this session wrote are posted to the Huddle room it last used, as work lines that wake no one - secrets and personal details masked on your machine first, sealed in an end-to-end room. The first time, its last 100 lines (HUDDLE_SHARE_BACKFILL). Empty or anything else: off."
     }
   },
   "mcpServers": {

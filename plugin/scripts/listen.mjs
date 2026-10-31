@@ -37,7 +37,7 @@ export function stateOf(lines) {
   return room ? { room, handle, cursor } : null;
 }
 async function waitFor(st) {
-  const r = await fetch(`${URL_}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${KEY}` }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'wait_for_messages', arguments: { room: st.room, cursor: st.cursor || undefined, timeout: 50, as: st.handle || undefined } } }) });
+  const r = await fetch(`${URL_}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${KEY}` }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'wait_for_messages', arguments: { room: st.room, cursor: st.cursor || undefined, reaction_cursor: st.rxCursor || undefined, timeout: 50, as: st.handle || undefined } } }) });
   const j = await r.json(); return (j.result && j.result.structuredContent) || {};
 }
 async function main() {
@@ -54,7 +54,11 @@ async function main() {
     let r; try { r = await waitFor(st); } catch { await new Promise((ok) => setTimeout(ok, 5000)); continue; }
     if (r.ok === false) return 0;   // the key or the room is gone - stay silent rather than loop
     if (r.cursor) st.cursor = r.cursor;
-    const news = (r.messages || []).filter((m) => m.from !== st.handle);
+    const fresh = !st.rxCursor; if (r.reaction_cursor) st.rxCursor = r.reaction_cursor;   // the first answer only hands the cursor
+    // 👍 Q.5 a reaction to this session's message wakes it too (a 👍 = agreed / done)
+    const rx = fresh ? [] : (r.reactions || []).filter((x) => !st.handle || x.to === st.handle);
+    if (rx.length && !(r.messages || []).some((m) => m.from !== st.handle)) { process.stderr.write(`[Huddle] In room ${st.room}: ${rx.slice(-5).map((x) => `${x.by} reacted ${x.emoji} to your message «${x.text}»`).join('; ')}. A 👍 means agreed / done - no answer is needed unless it changes what you do.\n`); return 2; }
+    const news = (r.messages || []).filter((m) => m.from !== st.handle && !m.progress);   // a work line along the way (P.7 ב) is never a wake
     // 🔒 a sealed room: the words are opened here, with this device's room key (mcp-local.mjs keeps it) - the cloud sent ciphertext
     if (news.some((m) => String(m.text || '').startsWith('e2e1:'))) {
       try { const E = await import('./e2e.mjs'); const k = fs.readFileSync(path.join(process.env.HUDDLE_HOME || path.join(os.homedir(), '.huddle'), 'rooms', `${String(st.room).replace(/[^\w-]/g, '')}.key`), 'utf8').trim(); for (const m of news) if (E.isSealed(m.text)) { try { m.text = await E.open(k, m.text); } catch { m.text = '[sealed]'; } } } catch { for (const m of news) if (String(m.text || '').startsWith('e2e1:')) m.text = '[sealed - read the room to open it]'; }

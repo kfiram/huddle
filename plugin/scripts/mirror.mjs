@@ -50,15 +50,35 @@ export function pack(texts, max = CHUNK) {
   return out;
 }
 
+/** Pure: this session's model and context fill, from its own transcript - the last main-thread request's usage, as the Claude app counts
+ *  «Context window N / M» (input + cache read + cache creation). Kfir 3.11: «פרטי חלון תוכן … צריכות להיות זמינות לכולם». → null if none. */
+export function statusOf(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let j; try { j = JSON.parse(lines[i]); } catch { continue; }
+    const m = j && j.type === 'assistant' && !j.isSidechain && j.message; const u = m && m.usage;
+    if (!u || !m.model || m.model === '<synthetic>') continue;
+    const tokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+    const window = /\[1m\]|-1m\b|context-1m/i.test(String(m.model)) || tokens > 200000 ? 1000000 : 200000;
+    return { model: String(m.model).slice(0, 80), context_tokens: tokens, context_window: window, at: j.timestamp || new Date().toISOString() };
+  }
+  return null;
+}
+
 const cursorFile = (sid) => path.join(HOME(), 'mirror', `${String(sid || 'x').replace(/[^\w-]/g, '')}.json`);
 const readJ = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const saveCursor = (sid, after) => { fs.mkdirSync(path.dirname(cursorFile(sid)), { recursive: true }); fs.writeFileSync(cursorFile(sid), JSON.stringify({ after, at: new Date().toISOString() })); };
 
 /** One upload: read, mask, post as work lines, move the cursor only past what landed. */
-export async function run(hook, { send = null } = {}) {
+export async function run(hook, { send = null, report = null, share = ON } = {}) {
   if (!hook || !hook.transcript_path || !fs.existsSync(hook.transcript_path)) return { ok: true, skipped: 'no transcript' };
   const lines = fs.readFileSync(hook.transcript_path, 'utf8').split('\n');
   const st = stateOf(lines); if (!st) return { ok: true, skipped: 'no room' };   // this session never used a Huddle room
+  // 📊 the session's model and context fill, for its person's Huddle (operational, like «last seen»; never the words) - every turn
+  let status = null; const s0 = statusOf(lines);
+  if (s0 && st.handle) { const doReport = report || (await import('./mcp-local.mjs')).handle.bind(null, 'agent_status'); try { status = await doReport({ as: st.handle, ...s0 }); } catch { status = null; } }
+  // 🎛️ the model / effort its person chose in Huddle, applied here from the next session - only while their «engineControl» setting is on (default)
+  let engine = null; if (status && status.ok && 'apply' in status) { try { engine = (await import('./engine.mjs')).applyEngine(hook.cwd, { want: status.want, apply: status.apply }); } catch { engine = null; } }
+  if (!share) return { ok: true, room: st.room, status: !!(status && status.ok), ...(engine && engine.changed ? { engine } : {}) };   // the words go up only with share_work on
   const sid = hook.session_id, prev = (readJ(cursorFile(sid)) || {}).after || null;
   const { texts, last } = newTexts(lines, prev, BACKFILL);
   const posts = pack(texts.map((x) => ({ ...x, text: mask(x.text).text })));
@@ -71,7 +91,7 @@ export async function run(hook, { send = null } = {}) {
   }
   if (sentN === posts.length) cursor = last;   // all of it landed: the cursor goes to the end of what was read
   if (cursor && cursor !== prev) saveCursor(sid, cursor);
-  return { ok: true, room: st.room, posts: posts.length, sent: sentN };
+  return { ok: true, room: st.room, posts: posts.length, sent: sentN, status: !!(status && status.ok), ...(engine && engine.changed ? { engine } : {}) };
 }
 
 async function main() {
@@ -84,7 +104,7 @@ async function main() {
     return 0;
   }
   let input = ''; for await (const ch of process.stdin) input += ch;
-  if (!ON || !(process.env.CLAUDE_PLUGIN_OPTION_HUDDLE_KEY || process.env.HUDDLE_KEY)) return 0;
+  if (!(process.env.CLAUDE_PLUGIN_OPTION_HUDDLE_KEY || process.env.HUDDLE_KEY)) return 0;   // the status goes up every turn; the words only with share_work on (run)
   const f = path.join(os.tmpdir(), `huddle-mirror-${process.pid}-${Date.now()}.json`); fs.writeFileSync(f, input || '{}');
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--run', f], { detached: true, stdio: 'ignore', windowsHide: true, env: process.env });
   child.unref();

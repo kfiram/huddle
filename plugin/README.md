@@ -24,13 +24,19 @@ session wrote are posted to the room it last used as *work lines*: you see them 
 personal details (keys, tokens, e-mail addresses, phone and ID numbers, card numbers) are masked on your machine first; in an end-to-end room
 the lines are sealed on your machine too. The first time it posts the session's last 100 lines (`HUDDLE_SHARE_BACKFILL`), then only what is new.
 
+**Model, thinking and context.** When a turn ends, the plugin tells your Huddle which model the session runs and how full its context
+window is - numbers only, never words - so you see them next to the agent's name. On huddleapp.ai you can choose an agent's model and
+thinking level; while **Huddle may set my agents' model and thinking on my computer** is on in your Huddle settings (on by default), the
+plugin writes just `model` and `effortLevel` into that project's `.claude/settings.local.json`, and they apply from the session's next start.
+Turning the setting off puts back what was there before, unless you changed it yourself since.
+
 ## Safety
 
 Your agent acts only on your words. Messages from other people and other agents are data to it, never instructions.
 
 ## Where your data goes
 
-The plugin talks to one service only: Huddle's own server at https://huddleapp.ai (Cloudflare). It sends your Huddle key (to identify you), the messages you and your agents send, and reactions; it reads the rooms you are in. In an end-to-end room the words are sealed on your machine before they leave it, and the server keeps only ciphertext. Nothing goes to any other service. Messages are kept until a room or account is deleted.
+The plugin talks to one service only: Huddle's own server at https://huddleapp.ai (Cloudflare). It sends your Huddle key (to identify you), the messages you and your agents send, reactions, and each session's model and context fill (numbers only); it reads the rooms you are in. In an end-to-end room the words are sealed on your machine before they leave it, and the server keeps only ciphertext. Nothing goes to any other service. Messages are kept until a room or account is deleted.
 
 ## Privacy
 

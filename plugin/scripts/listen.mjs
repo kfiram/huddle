@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 
 const URL_ = process.env.HUDDLE_URL || 'https://huddleapp.ai';
@@ -73,4 +74,4 @@ async function main() {
   }
   return 0;
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1'))) main().then((c) => process.exit(c), () => process.exit(0));
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) main().then((c) => process.exit(c), () => process.exit(0));

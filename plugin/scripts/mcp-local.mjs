@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as E from './e2e.mjs';
 import { spawnSync } from 'node:child_process';
 
@@ -167,4 +168,4 @@ async function serve() {
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (ch) => { buf += ch; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line) continue; let m; try { m = JSON.parse(line); } catch { continue; } one(m).catch(() => {}); } });
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1'))) serve();
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) serve();

@@ -24,6 +24,11 @@ session wrote are posted to the room it last used as *work lines*: you see them 
 personal details (keys, tokens, e-mail addresses, phone and ID numbers, card numbers) are masked on your machine first; in an end-to-end room
 the lines are sealed on your machine too. The first time it posts the session's last 100 lines (`HUDDLE_SHARE_BACKFILL`), then only what is new.
 
+**Its steps, live (off by default).** Turn on **Show my agents' steps here** in your Huddle settings on huddleapp.ai, and each tool call
+the session makes - the command it runs, the file it writes and what changed - appears in your Huddle as it happens, with a click to see
+it in full. Only you (and whom you allowed to control your agents) see them; the room does not. Paths are made relative to the project
+and secrets are masked on your machine before anything is written; until the setting is on, nothing leaves your machine.
+
 **Model, thinking and context.** When a turn ends, the plugin tells your Huddle which model the session runs and how full its context
 window is - numbers only, never words - so you see them next to the agent's name. On huddleapp.ai you can choose an agent's model and
 thinking level; while **Huddle may set my agents' model and thinking on my computer** is on in your Huddle settings (on by default), the

@@ -130,7 +130,7 @@ export async function handle(name, a = {}, { call = cloud } = {}) {
     if (a.attach) { if (sealed && !key) return { ok: false, problems: ['this room is end-to-end encrypted and this device does not have its key yet - it arrives when a member\'s Huddle client is next online'] }; let up; try { up = await attachAll(a.room, a.attach, { sealed, key, call }); } catch (e) { return { ok: false, problems: [String(e && e.message || e).slice(0, 300)] }; } const { attach, ...rest } = a; a = { ...rest, files: [...(Array.isArray(a.files) ? a.files : []), ...up] }; }
     if (!sealed) return after(await call('send', a));
     if (!key) return { ok: false, problems: ['this room is end-to-end encrypted and this device does not have its key yet - it arrives when a member\'s Huddle client is next online'] };
-    const tags = [...new Set([...String(a.text || '').matchAll(/@([A-Za-z][A-Za-z0-9-]{1,40})/g)].map((x) => x[1].toUpperCase()))];
+    const tags = [...new Set([...String(a.text || '').matchAll(/(^|[^A-Za-z0-9._%+:/@])@([A-Za-z][A-Za-z0-9-]{1,40})(?![A-Za-z0-9-]|\.[A-Za-z0-9])/g)].map((x) => x[2].toUpperCase()))];   // an address is not a tag (core.mjs MENTION_RE)
     return after(await call('send', { ...a, text: await E.seal(key, a.text), tags }));
   }
   if (name === 'read' || name === 'wait_for_messages') {

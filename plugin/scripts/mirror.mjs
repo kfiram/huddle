@@ -80,7 +80,7 @@ export async function run(hook, { send = null, report = null, share = ON } = {})
   let engine = null; if (status && status.ok && 'apply' in status) { try { engine = (await import('./engine.mjs')).applyEngine(hook.cwd, { want: status.want, apply: status.apply }); } catch { engine = null; } }
   // 👣 #71 the steps switch, as the status answer carries it, kept for this session's PreToolUse hook (steps.mjs); while on, the turn's
   //    last steps go up and the turn is marked over
-  if (status && status.ok && hook.session_id) { try { const S = await import('./steps.mjs'); S.remember(hook.session_id, { on: status.steps === true, handle: st.handle, room: st.room }); if (status.steps === true) await S.flush(hook.session_id, { ended: true }); } catch { /* the words still go up */ } }
+  if (status && status.ok && hook.session_id) { try { const S = await import('./steps.mjs'); S.remember(hook.session_id, { on: status.steps === true, handle: st.handle, room: st.room }); if (status.steps === true) await S.flush(hook.session_id, { ended: true, transcript: hook.transcript_path, format: 'claude' }); } catch { /* the words still go up */ } }
   if (!share) return { ok: true, room: st.room, status: !!(status && status.ok), ...(engine && engine.changed ? { engine } : {}) };   // the words go up only with share_work on
   const sid = hook.session_id, prev = (readJ(cursorFile(sid)) || {}).after || null;
   const { texts, last } = newTexts(lines, prev, BACKFILL);

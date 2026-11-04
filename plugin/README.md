@@ -24,10 +24,13 @@ session wrote are posted to the room it last used as *work lines*: you see them 
 personal details (keys, tokens, e-mail addresses, phone and ID numbers, card numbers) are masked on your machine first; in an end-to-end room
 the lines are sealed on your machine too. The first time it posts the session's last 100 lines (`HUDDLE_SHARE_BACKFILL`), then only what is new.
 
-**Its steps, live (off by default).** Turn on **Show my agents' steps here** in your Huddle settings on huddleapp.ai, and each tool call
-the session makes - the command it runs, the file it writes and what changed - appears in your Huddle as it happens, with a click to see
-it in full. Only you (and whom you allowed to control your agents) see them; the room does not. Paths are made relative to the project
-and secrets are masked on your machine before anything is written; until the setting is on, nothing leaves your machine.
+**Its steps, live - and what it made or looked at (on by default).** Each tool call the session makes - the command it runs, the file
+it writes and what changed - appears in your Huddle as it happens, with a click to see it in full, beside the lines it writes between
+its steps and its thinking. The files it makes and the pictures it looks at come too: a screenshot, a picture it read, a file it wrote
+are uploaded to the session's room (sealed on your machine in an end-to-end room) and shown on their step - 🖼️ for a picture, 📄 for a
+document - opening with a click. Only you (and whom you allowed to control your agents) see them; others in a shared room see them only
+when you share your work. Paths are made relative to the project and secrets in text are masked on your machine before anything is
+written. To stop it, turn off **Show my agents' steps here** in your Huddle settings on huddleapp.ai - from then on nothing leaves your machine.
 
 **Model, thinking and context.** When a turn ends, the plugin tells your Huddle which model the session runs and how full its context
 window is - numbers only, never words - so you see them next to the agent's name. On huddleapp.ai you can choose an agent's model and

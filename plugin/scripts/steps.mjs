@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 import { mask } from './pii.mjs';
 
 const HOME = () => process.env.HUDDLE_HOME || path.join(os.homedir(), '.huddle');
@@ -218,6 +219,62 @@ export function subagentOf(transcriptPath, toolUseId, cwd = '') {
   }
   return null;
 }
+// 🤖 HELPERS OF CODEX AND ANTIGRAVITY, IN THE CLOUD (transparency (6) for every engine, 6.11 - the local readers: whatsup.mjs codexHelperOf /
+//    antigravityHelperOf). Their call returns at once and the helper works on, so they are read at the TURN'S END, from the turn's own tail of
+//    the transcript (a live Codex rollout passes 1.9 GB - only its last bytes are read). Codex: spawn_agent → the helper's own rollout, whose
+//    first line names its parent thread and agent_path (= the call's task_name), in the folder of the day it began. Antigravity:
+//    invoke_subagent's result names the helper's conversation → brain/<id> transcript, and the parent's subagents/<id>.json its type and role.
+const TAIL = 8 * 1024 * 1024;
+const tailLines = (f, bytes = TAIL) => { const fd = fs.openSync(f, 'r'); try { const size = fs.fstatSync(fd).size, n = Math.min(size, bytes), b = Buffer.alloc(n); fs.readSync(fd, b, 0, n, size - n); const ls = b.toString('utf8').split('\n'); if (size > n) ls.shift(); return ls; } finally { fs.closeSync(fd); } };
+const allLines = (f) => { let b = fs.readFileSync(f); if (f.endsWith('.zst')) b = zlib.zstdDecompressSync(b); return b.toString('utf8').split('\n'); };
+const parseArgs = (a) => { if (a && typeof a === 'object') return a; try { return JSON.parse(String(a || '{}')); } catch { return { input: String(a || '').slice(0, 300) }; } };
+const smallInput = (v, cwd) => { let input = small(cleanInput(v, cwd)); if (JSON.stringify(input).length > SUB_INPUT) input = { note: 'too large to show' }; return input; };
+/** Pure-ish: one helper's lines → { calls, total, answer } in the cloud's sub shape. */
+function helperCalls(lines, format, cwd) {
+  const calls = [];
+  for (const l of lines) { let j; try { j = JSON.parse(l); } catch { continue; } if (!j) continue;
+    if (format === 'codex') { const p = j.payload || {}; if (j.type === 'response_item' && /^(function_call|custom_tool_call)$/.test(p.type || '')) calls.push({ at: j.timestamp || null, id: String(p.call_id || p.id || ''), name: String(p.name || '').slice(0, 120), input: smallInput(parseArgs(p.arguments ?? p.input), cwd) }); }
+    else if (j.type === 'PLANNER_RESPONSE' && Array.isArray(j.tool_calls)) j.tool_calls.forEach((x, k) => calls.push({ at: j.created_at || null, id: `${j.step_index}:${k}`, name: String((x && x.name) || '').slice(0, 120), input: smallInput(parseArgs(x && (x.args ?? x.arguments)), cwd) }));
+  }
+  const last = textsOf(lines, format).filter((t) => !t.thought).pop();
+  return { calls: calls.slice(-200), total: calls.length, answer: last ? last.text.slice(0, 4000) : '' };
+}
+export function helpersOfTurn(transcriptPath, format, sinceIso = '', cwd = '') {
+  if (!transcriptPath || !/^(codex|antigravity)$/.test(format)) return [];
+  const since = Date.parse(sinceIso) || 0, out = [], lines = tailLines(transcriptPath);
+  const atOf = (j) => Date.parse(format === 'codex' ? j.timestamp : j.created_at) || 0;
+  if (format === 'codex') {
+    const parent = (/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i.exec(transcriptPath) || [])[1]; if (!parent) return [];
+    const home = path.resolve(path.dirname(transcriptPath), '..', '..', '..');   // sessions/YYYY/MM/DD/rollout-… → sessions
+    for (const l of lines) { if (!l.includes('spawn_agent')) continue; let j; try { j = JSON.parse(l); } catch { continue; } const p = (j && j.payload) || {};
+      if (!(j.type === 'response_item' && /call$/.test(p.type || '') && p.name === 'spawn_agent') || atOf(j) < since) continue;
+      const args = parseArgs(p.arguments), want = String(args.task_name || '').replace(/^\/root\//, ''), t0 = atOf(j), cands = [];
+      for (const off of [0, 864e5]) { const d = new Date(t0 + off), dir = path.join(home, String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0'));
+        let ns = []; try { ns = fs.readdirSync(dir); } catch { continue; }
+        for (const n of ns) { const mm = /([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/.exec(n); if (!mm) continue; const ms = parseInt(mm[1].replace(/-/g, '').slice(0, 12), 16); if (ms < t0 - 2000 || ms > t0 + 600e3) continue;
+          let meta = null; try { meta = JSON.parse(allLines(path.join(dir, n))[0]).payload; } catch { continue; } const sp = meta && meta.source && meta.source.subagent && meta.source.subagent.thread_spawn;
+          if (sp && sp.parent_thread_id === parent) cands.push({ f: path.join(dir, n), ms, sp }); } }
+      cands.sort((a, b) => a.ms - b.ms); const hit = (want && cands.find((c) => String(c.sp.agent_path || '').replace(/^\/root\//, '') === want)) || cands[0]; if (!hit) continue;
+      let hl = []; try { hl = allLines(hit.f); } catch { continue; }
+      out.push({ call: { at: j.timestamp, id: String(p.call_id || ''), name: 'spawn_agent', input: smallInput(args, cwd) },
+        sub: { engine: 'codex', type: String(hit.sp.agent_role || 'helper').slice(0, 60), description: mask(String(hit.sp.agent_nickname ? `${hit.sp.agent_nickname}${hit.sp.agent_path ? ` · ${hit.sp.agent_path}` : ''}` : (hit.sp.agent_path || '')).slice(0, 200)).text, ...helperCalls(hl, 'codex', cwd) } });
+    }
+  } else {
+    const brain = path.resolve(path.dirname(transcriptPath), '..', '..', '..'), parent = path.basename(path.resolve(path.dirname(transcriptPath), '..', '..'));   // brain/<conv>/.system_generated/logs/…
+    let pending = [];
+    for (const l of lines) { let j; try { j = JSON.parse(l); } catch { continue; } if (!j || atOf(j) < since) continue;
+      if (j.type === 'PLANNER_RESPONSE' && Array.isArray(j.tool_calls)) j.tool_calls.forEach((x, k) => { if (x && x.name === 'invoke_subagent') pending.push({ at: j.created_at, id: `${j.step_index}:${k}`, input: x.args }); });
+      if (j.type === 'GENERIC' && typeof j.content === 'string' && j.content.includes('Created the following subagents') && pending.length) {
+        const c = pending.shift(), id = (/"conversationId"\s*:\s*"([0-9a-f-]{36})"/.exec(j.content) || [])[1]; if (!id) continue;
+        let d = {}; try { d = JSON.parse(fs.readFileSync(path.join(brain, parent, '.system_generated', 'subagents', `${id}.json`), 'utf8')) || {}; } catch { /* optional */ }
+        let hl = []; for (const n of ['transcript_full.jsonl', 'transcript.jsonl']) { try { hl = fs.readFileSync(path.join(brain, id, '.system_generated', 'logs', n), 'utf8').split('\n'); break; } catch { /* next */ } } if (!hl.length) continue;
+        const sd = d.subagentDescriptor || {};
+        out.push({ call: { at: c.at, id: c.id, name: 'invoke_subagent', input: smallInput(c.input, cwd) }, sub: { engine: 'antigravity', type: String(sd.typeName || 'helper').slice(0, 60), description: mask(String(sd.role || '').slice(0, 200)).text, ...helperCalls(hl, 'antigravity', cwd) } });
+      }
+    }
+  }
+  return out;
+}
 /** The PostToolUse / PostToolUseFailure hook: queue the call's result and its file for the sender (only while the switch is on and the session knows its room). */
 export function recordResult(hook, { spawnFlush = true } = {}) {
   const info = infoOf(hook && hook.session_id); if (!info || !info.on || !info.handle || !info.room) return { ok: true, skipped: 'off or no room' };
@@ -265,6 +322,9 @@ export async function flush(session, { ended = false, send = null, transcript = 
   // the turn's end: its last lines (the answer, the thinking before it) - read now, beside whatever steps gathered
   if (transcript) { try { const rd = collectRead(session, transcript, format), add = [...rd.ctx.map((c) => ({ type: 'ctx', ...c })), ...rd.texts.map((t) => ({ type: 'text', ...t }))]; if (add.length) { fs.mkdirSync(DIR(), { recursive: true }); fs.appendFileSync(f, add.map((x) => JSON.stringify(x)).join('\n') + '\n'); } } catch { /* the steps still go */ } }
   try { fs.renameSync(f, taking); items = fs.readFileSync(taking, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { /* nothing gathered */ }
+  if (ended && transcript && /^(codex|antigravity)$/.test(format)) { try { for (const h of helpersOfTurn(transcript, format, info.turn || '')) {
+    const near = items.find((x) => !x.type && x.name === h.call.name && Math.abs(Date.parse(x.at) - Date.parse(h.call.at)) < 5000);
+    if (!near) items.push(h.call); items.push({ type: 'sub', id: near ? near.id : h.call.id, sub: h.sub }); } } catch { /* the turn's other lines still go */ } }
   const texts = items.filter((x) => x.type === 'text').map(({ type, ...t }) => t).slice(-60), steps = items.filter((x) => x.type !== 'text' && x.type !== 'upload' && x.type !== 'out' && x.type !== 'ctx' && x.type !== 'sub'), ctx = items.filter((x) => x.type === 'ctx').map(({ type, ...c }) => c).slice(-60), subs = items.filter((x) => x.type === 'sub').map(({ type, ...x }) => x).slice(-10), ups = items.filter((x) => x.type === 'upload'), outs = items.filter((x) => x.type === 'out').map(({ type, ...o }) => o).slice(-40);
   if (!info.on) { for (const u of ups) if (u.tmp) try { fs.unlinkSync(u.local); } catch { /* gone */ } try { fs.unlinkSync(taking); } catch { /* none */ } return { ok: true, sent: 0, off: true }; }
   const results = info.room ? await uploadAll(info.room, ups, { attach }) : [];

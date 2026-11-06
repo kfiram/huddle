@@ -73,19 +73,59 @@ export function textsOf(lines, format = 'claude') {
   }
   return out;
 }
-/** What the transcript gained since this session last read it → texts (the offset moves past the last whole line). Only while on. */
-export function collectTexts(session, file, format = 'claude') {
-  const info = infoOf(session); if (!file || !info || !info.on) return [];
-  let size; try { size = fs.statSync(file).size; } catch { return []; }
+// 🧠 WHAT REACHED IT BESIDES ITS OWN WORK (transparency (1), in the cloud 6.11 - the site's section waits on it): read from the same lines
+//    as its texts, by the rules a local Huddle uses (whatsup.mjs contextOf · codexContextOf · antigravityContextOf): what hooks added, what
+//    arrived while it worked, a file changed outside its own edits, the app's reminders and compactions. Masked, 2,000 characters each.
+const CTX_CAP = 2000;
+/** Pure: one engine's transcript lines → [{ at, kind: 'hook'|'message'|'file'|'app', name, text }], masked. */
+export function ctxOf(lines, format = 'claude') {
+  const out = [], cut = (v) => { const t = mask(String(v || '')).text; return t.length > CTX_CAP ? `${t.slice(0, CTX_CAP)}\n… (${t.length - CTX_CAP} more characters)` : t; };
+  const tag = (v) => { const t = String(v || '').trimStart(); return ((/^\[([A-Z][A-Z0-9_]{2,40})\]/.exec(t) || [])[1]) || ((/^<([a-z_][\w-]{2,40})/.exec(t) || [])[1]) || null; };
+  const wake = (v) => (/from-name="([^"]+)"/.exec(String(v || '')) || /\[GW-WAKE\] from ([\w-]+)/.exec(String(v || '')) || [])[1];
+  const add = (at, kind, name, text) => out.push({ at: new Date(Date.parse(at || '') || Date.now()).toISOString(), kind, name: String(name || '').slice(0, 80), text: cut(text) });
+  for (const l of lines || []) {
+    let j; try { j = JSON.parse(l); } catch { continue; } if (!j || typeof j !== 'object') continue;
+    if (format === 'antigravity') {
+      const K = { SYSTEM_MESSAGE: ['app', 'system message'], EPHEMERAL_MESSAGE: ['hook', null], CHECKPOINT: ['app', 'compaction'], USER_INPUT: ['message', null] }[j.type];
+      if (K) { const text = String(j.content || ''); add(j.created_at, K[0], K[1] || tag(text) || wake(text) || (K[0] === 'hook' ? 'a hook' : 'a message'), text); }
+      continue;
+    }
+    if (format === 'codex') {
+      const q = j.payload || {};
+      if (j.type === 'compacted') { add(j.timestamp, 'app', 'compaction', q.message || ''); continue; }
+      if (q.type !== 'message' || (q.role !== 'developer' && q.role !== 'user')) continue;
+      const text = [].concat(q.content || []).map((c) => (c && (c.text || c.input_text)) || '').filter(Boolean).join('\n'); if (!text.trim()) continue;
+      const src = (/^<codex_internal_context source="([^"]+)"/.exec(text.trimStart()) || [])[1];
+      if (q.role === 'developer') add(j.timestamp, 'app', tag(text) || 'developer', text);
+      else if (src) add(j.timestamp, 'app', src, text);
+      else if (/^\s*\[[A-Z][A-Z0-9_]{2,40}\]/.test(text)) add(j.timestamp, 'hook', tag(text), text);
+      else add(j.timestamp, 'message', wake(text) || 'a message', text);
+      continue;
+    }
+    const x = j.attachment; if (!x || typeof x !== 'object' || j.isSidechain) continue;
+    if (x.type === 'hook_additional_context') for (const c of [].concat(x.content || [])) add(j.timestamp, 'hook', tag(c) || x.hookName || 'a hook', c);
+    else if (x.type === 'hook_success' && /additionalContext/.test(String(x.stdout || ''))) { let a = ''; try { a = JSON.parse(x.stdout).hookSpecificOutput.additionalContext; } catch { a = ''; } if (a) add(j.timestamp, 'hook', tag(a) || x.hookName || 'a hook', a); }
+    else if (x.type === 'queued_command') add(j.timestamp, 'message', wake(x.prompt) || 'a message', x.prompt);
+    else if (x.type === 'edited_text_file') add(j.timestamp, 'file', String(x.filename || '').split(/[\\/]/).slice(-2).join('/'), x.snippet);
+    else if (x.type === 'silent_turn_reminder' || x.type === 'compact_boundary') add(j.timestamp, 'app', x.type.replace(/_/g, ' '), x.text || '');
+  }
+  return out;
+}
+/** What the transcript gained since this session last read it → { texts, ctx } (the offset moves past the last whole line). Only while on. */
+export function collectRead(session, file, format = 'claude') {
+  const info = infoOf(session); if (!file || !info || !info.on) return { texts: [], ctx: [] };
+  let size; try { size = fs.statSync(file).size; } catch { return { texts: [], ctx: [] }; }
   const known = info.tFile === file && Number.isFinite(info.tOff) && info.tOff <= size;
   let from = known ? info.tOff : Math.max(0, size - TX_FIRST); if (size - from > TX_MAX) from = size - TX_MAX;
-  if (size <= from) return [];
+  if (size <= from) return { texts: [], ctx: [] };
   const b = Buffer.alloc(size - from), fd = fs.openSync(file, 'r'); try { fs.readSync(fd, b, 0, b.length, from); } finally { fs.closeSync(fd); }
-  const end = b.lastIndexOf(10); if (end < 0) return [];
+  const end = b.lastIndexOf(10); if (end < 0) return { texts: [], ctx: [] };
   let body = b.subarray(0, end).toString('utf8'); if (!known && from > 0) body = body.slice(body.indexOf('\n') + 1);   // a first read starts mid-line
   writeJ(infoF(session), { ...info, tFile: file, tOff: from + end + 1 });
-  return textsOf(body.split('\n'), format);
+  const L = body.split('\n'); return { texts: textsOf(L, format), ctx: ctxOf(L, format) };
 }
+/** The texts alone (as before collectRead). */
+export const collectTexts = (session, file, format = 'claude') => collectRead(session, file, format).texts;
 /** This session's switch and address, as the last turn's end learned them: { on, handle, room, turn } | null. */
 export const infoOf = (session) => readJ(infoF(session));
 /** mirror.mjs, at each turn's end: what agent_status answered (on), and who / where this session is. */
@@ -99,8 +139,8 @@ export function record(hook, { spawnFlush = true } = {}) {
   // the first step after a turn closed opens the next one - an engine with no «new prompt» signal of its own still starts a fresh list
   if (info.closed || !info.turn) writeJ(infoF(hook.session_id), { ...infoOf(hook.session_id), closed: false, turn: s.at });
   // what it wrote and thought before this call, then the call - the order the chat shows them in
-  let tx = []; try { tx = collectTexts(hook.session_id, hook.transcript_path, hook.textFormat || 'claude'); } catch { tx = []; }
-  fs.mkdirSync(DIR(), { recursive: true }); fs.appendFileSync(spoolF(hook.session_id), [...tx.map((t) => JSON.stringify({ type: 'text', ...t })), JSON.stringify(s)].join('\n') + '\n');
+  let rd = { texts: [], ctx: [] }; try { rd = collectRead(hook.session_id, hook.transcript_path, hook.textFormat || 'claude'); } catch { /* the step still goes */ }
+  fs.mkdirSync(DIR(), { recursive: true }); fs.appendFileSync(spoolF(hook.session_id), [...rd.ctx.map((c) => JSON.stringify({ type: 'ctx', ...c })), ...rd.texts.map((t) => JSON.stringify({ type: 'text', ...t })), JSON.stringify(s)].join('\n') + '\n');
   if (spawnFlush) { let busy = false; try { busy = Date.now() - fs.statSync(lockF(hook.session_id)).mtimeMs < 30000; } catch { /* none */ } if (!busy) { const c = spawn(process.execPath, [fileURLToPath(import.meta.url), '--flush', sid(hook.session_id)], { detached: true, stdio: 'ignore', windowsHide: true, env: process.env }); c.unref(); } }
   return { ok: true, spooled: 1 };
 }
@@ -128,10 +168,40 @@ export function fileOfCall(name, input = {}, cwd = '') {
   for (const k of ['filePath', 'file_path', 'path', 'filename', 'savePath', 'outputPath', 'output', 'output_path', 'image_path', 'imagePath']) { const v = i[k]; if (typeof v === 'string' && PIC.test(v.trim())) return abs(v.trim()); }
   return null;
 }
-/** The PostToolUse hook: queue the call's file for the sender (only while the switch is on and the session knows its room). */
+// 🧾 WHAT A CALL GAVE, AND WHY ONE WAS STOPPED - in the cloud too (transparency, 6.11: a local Huddle showed both, huddleapp.ai neither). The
+//    PostToolUse hook's tool_response, or PostToolUseFailure's error (a call that failed or was refused), as text - masked here, at most
+//    20,000 characters; the cloud bounds it again and names a refusal with the same rule as this machine (core withResult).
+const OUT_MAX = 20000;
+/** Pure: a tool's response → its text (a string, Bash's stdout/stderr, an MCP content list's texts, else its JSON). */
+export function responseText(resp) {
+  if (resp == null) return '';
+  if (typeof resp === 'string') return resp;
+  if (Array.isArray(resp)) return resp.map((x) => (typeof x === 'string' ? x : x && x.type === 'text' ? String(x.text || '') : '')).filter(Boolean).join('\n');
+  if (typeof resp === 'object') {
+    if ('stdout' in resp || 'stderr' in resp) return [resp.stdout, resp.stderr].filter((x) => typeof x === 'string' && x).join('\n');
+    if (Array.isArray(resp.content)) return responseText(resp.content);
+    if (typeof resp.content === 'string') return resp.content;
+    if (resp.file && typeof resp.file.content === 'string') return resp.file.content;
+    try { return JSON.stringify(resp); } catch { return ''; }
+  }
+  return String(resp);
+}
+/** Pure: the hook's JSON → { id, text, failed } of the call's result, or null. */
+export function outOf(hook) {
+  const id = String((hook && hook.tool_use_id) || ''); if (!id) return null;
+  const failed = hook.hook_event_name === 'PostToolUseFailure' || typeof hook.error === 'string';
+  let text = failed ? String(hook.error || '') : responseText(hook.tool_response);
+  if (!text.trim()) return null;
+  if (text.length > OUT_MAX) text = `${text.slice(0, OUT_MAX)}\n… (${text.length - OUT_MAX} more characters)`;
+  return { id, text: mask(text).text, ...(failed ? { failed: true } : {}) };
+}
+/** The PostToolUse / PostToolUseFailure hook: queue the call's result and its file for the sender (only while the switch is on and the session knows its room). */
 export function recordResult(hook, { spawnFlush = true } = {}) {
   const info = infoOf(hook && hook.session_id); if (!info || !info.on || !info.handle || !info.room) return { ok: true, skipped: 'off or no room' };
   const id = String((hook && hook.tool_use_id) || ''); if (!id) return { ok: true, skipped: 'no call id' };
+  const out = outOf(hook); if (out) { fs.mkdirSync(DIR(), { recursive: true }); fs.appendFileSync(spoolF(hook.session_id), JSON.stringify({ type: 'out', ...out }) + '\n'); }
+  const kick = () => { if (!spawnFlush) return; let busy = false; try { busy = Date.now() - fs.statSync(lockF(hook.session_id)).mtimeMs < 30000; } catch { /* none */ } if (!busy) { const c = spawn(process.execPath, [fileURLToPath(import.meta.url), '--flush', sid(hook.session_id)], { detached: true, stdio: 'ignore', windowsHide: true }); c.unref(); } };
+  if (hook.hook_event_name === 'PostToolUseFailure') { kick(); return { ok: true, queued: 'result' }; }
   let local = fileOfCall(String(hook.tool_name || ''), hook.tool_input, hook.cwd), tmp = false;
   const pic = hook.tool_name === 'Read' ? null : pictureOf(hook.tool_response);
   if (pic) {   // a picture handed back in the result: written once here, uploaded by the sender, then removed
@@ -139,11 +209,11 @@ export function recordResult(hook, { spawnFlush = true } = {}) {
     local = path.join(DIR(), 'files', `${sid(hook.session_id)}-${id.replace(/[^\w-]/g, '').slice(-24)}.${ext}`); tmp = true;
     try { fs.mkdirSync(path.dirname(local), { recursive: true }); fs.writeFileSync(local, Buffer.from(pic.data, 'base64')); } catch { return { ok: true, skipped: 'could not keep the picture' }; }
   }
-  if (!local) return { ok: true, skipped: 'no file' };
+  if (!local) { if (out) kick(); return { ok: true, skipped: 'no file', ...(out ? { result: true } : {}) }; }
   let size = 0; try { size = fs.statSync(local).size; } catch { return { ok: true, skipped: 'no such file' }; }
   if (!size || size > MAX_UP) { if (tmp) try { fs.unlinkSync(local); } catch { /* gone */ } return { ok: true, skipped: 'empty or over 10 MB' }; }
   fs.mkdirSync(DIR(), { recursive: true }); fs.appendFileSync(spoolF(hook.session_id), JSON.stringify({ type: 'upload', id, local, image: PIC.test(local), ...(tmp ? { tmp: true } : {}) }) + '\n');
-  if (spawnFlush) { let busy = false; try { busy = Date.now() - fs.statSync(lockF(hook.session_id)).mtimeMs < 30000; } catch { /* none */ } if (!busy) { const c = spawn(process.execPath, [fileURLToPath(import.meta.url), '--flush', sid(hook.session_id)], { detached: true, stdio: 'ignore', windowsHide: true, env: process.env }); c.unref(); } }
+  kick();
   return { ok: true, queued: local };
 }
 /** The uploads a flush carries: each queued file to the room (sealed when the room is), as { id, files }; a temp picture is removed after. */
@@ -169,19 +239,19 @@ export async function flush(session, { ended = false, send = null, transcript = 
   const info = infoOf(session); if (!info || !info.handle) return { ok: true, sent: 0 };
   const f = spoolF(session), taking = `${f}.${process.pid}.sending`; let items = [];
   // the turn's end: its last lines (the answer, the thinking before it) - read now, beside whatever steps gathered
-  if (transcript) { try { const tx = collectTexts(session, transcript, format); if (tx.length) { fs.mkdirSync(DIR(), { recursive: true }); fs.appendFileSync(f, tx.map((t) => JSON.stringify({ type: 'text', ...t })).join('\n') + '\n'); } } catch { /* the steps still go */ } }
+  if (transcript) { try { const rd = collectRead(session, transcript, format), add = [...rd.ctx.map((c) => ({ type: 'ctx', ...c })), ...rd.texts.map((t) => ({ type: 'text', ...t }))]; if (add.length) { fs.mkdirSync(DIR(), { recursive: true }); fs.appendFileSync(f, add.map((x) => JSON.stringify(x)).join('\n') + '\n'); } } catch { /* the steps still go */ } }
   try { fs.renameSync(f, taking); items = fs.readFileSync(taking, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { /* nothing gathered */ }
-  const texts = items.filter((x) => x.type === 'text').map(({ type, ...t }) => t).slice(-60), steps = items.filter((x) => x.type !== 'text' && x.type !== 'upload'), ups = items.filter((x) => x.type === 'upload');
+  const texts = items.filter((x) => x.type === 'text').map(({ type, ...t }) => t).slice(-60), steps = items.filter((x) => x.type !== 'text' && x.type !== 'upload' && x.type !== 'out' && x.type !== 'ctx'), ctx = items.filter((x) => x.type === 'ctx').map(({ type, ...c }) => c).slice(-60), ups = items.filter((x) => x.type === 'upload'), outs = items.filter((x) => x.type === 'out').map(({ type, ...o }) => o).slice(-40);
   if (!info.on) { for (const u of ups) if (u.tmp) try { fs.unlinkSync(u.local); } catch { /* gone */ } try { fs.unlinkSync(taking); } catch { /* none */ } return { ok: true, sent: 0, off: true }; }
   const results = info.room ? await uploadAll(info.room, ups, { attach }) : [];
   const doSend = send || cloudSend;
   let sent = 0, r = null;
-  const batches = []; for (let i = 0; i < steps.length; i += BATCH) batches.push(steps.slice(i, i + BATCH)); if (!batches.length && (ended || texts.length || results.length)) batches.push([]);
+  const batches = []; for (let i = 0; i < steps.length; i += BATCH) batches.push(steps.slice(i, i + BATCH)); if (!batches.length && (ended || texts.length || results.length || outs.length || ctx.length)) batches.push([]);
   for (let i = 0; i < batches.length; i++) {
-    const tx = i === 0 ? texts : [], rs = i === batches.length - 1 ? results : [];   // the lines ride with the first batch; the files with the last, after their steps
-    try { r = await doSend({ as: info.handle, room: info.room || undefined, turn: info.turn || '', steps: batches[i], ...(tx.length ? { texts: tx } : {}), ...(rs.length ? { results: rs } : {}), ended: ended && i === batches.length - 1 }); } catch (e) { r = { ok: false, problems: [String((e && e.message) || e)] }; }
+    const tx = i === 0 ? texts : [], cx = i === 0 ? ctx : [], rs = i === batches.length - 1 ? results : [], os = i === batches.length - 1 ? outs : [];   // the lines ride with the first batch; the files with the last, after their steps
+    try { r = await doSend({ as: info.handle, room: info.room || undefined, turn: info.turn || '', steps: batches[i], ...(tx.length ? { texts: tx } : {}), ...(cx.length ? { ctx: cx } : {}), ...(rs.length ? { results: rs } : {}), ...(os.length ? { outs: os } : {}), ended: ended && i === batches.length - 1 }); } catch (e) { r = { ok: false, problems: [String((e && e.message) || e)] }; }
     if (r && r.off) { remember(session, { on: false }); break; }   // switched off in Huddle since: keep nothing, send nothing
-    if (!r || r.ok === false) { const back = [...tx.map((t) => ({ type: 'text', ...t })), ...batches.slice(i).flat()]; if (back.length) fs.appendFileSync(f, back.map((x) => JSON.stringify(x)).join('\n') + '\n'); break; }
+    if (!r || r.ok === false) { const back = [...cx.map((c) => ({ type: 'ctx', ...c })), ...tx.map((t) => ({ type: 'text', ...t })), ...batches.slice(i).flat(), ...outs.map((o) => ({ type: 'out', ...o }))]; if (back.length) fs.appendFileSync(f, back.map((x) => JSON.stringify(x)).join('\n') + '\n'); break; }
     sent += batches[i].length;
   }
   try { fs.unlinkSync(taking); } catch { /* none */ }

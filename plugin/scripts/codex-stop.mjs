@@ -66,6 +66,17 @@ export function codexStatusOf(lines, { model: hookModel = null } = {}) {
   return { model: String(model).slice(0, 80), ...(effort ? { effort: String(effort).slice(0, 20) } : {}), context_tokens: tokens, context_window: window, at: at || new Date().toISOString() };
 }
 
+/** Codex's OWN list of models on this machine (~/.codex/models_cache.json: visible models, each with its own thinking levels) - so the menu
+ *  on huddleapp.ai offers what this Codex offers, not a guess (Kfir 6.11: what works for a Huddle user with Codex and no CorpOS). → [{ id, label, efforts }] | null */
+export function codexChoicesOf(env = process.env, home = os.homedir()) {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(env.CODEX_HOME || path.join(home, '.codex'), 'models_cache.json'), 'utf8')), ok = (s) => /^[A-Za-z0-9._:\-\[\]]{1,80}$/.test(String(s || ''));
+    const out = (j.models || []).filter((m) => m && ok(m.slug) && m.visibility !== 'hide').slice(0, 24).map((m) => ({ id: m.slug, label: String(m.display_name || m.slug).slice(0, 60),
+      efforts: (m.supported_reasoning_levels || []).map((x) => (typeof x === 'string' ? x : x && x.effort)).filter((e) => /^[a-z]{2,20}$/.test(String(e || ''))).slice(0, 8) }));
+    return out.length ? out : null;
+  } catch { return null; }
+}
+
 /** The person's key: HUDDLE_KEY, else the Bearer the installer wrote into ~/.codex/config.toml [mcp_servers.huddle]. */
 export function keyOf(env = process.env, home = os.homedir()) {
   if (env.HUDDLE_KEY) return env.HUDDLE_KEY;
@@ -86,7 +97,10 @@ function topSet(lines, key, val) {
   if (!done && val !== undefined) { const at = out.length && out[out.length - 1] === '' ? out.length - 1 : out.length; out.splice(at, 0, `${key} = ${tomlStr(val)}`); }
   return out;
 }
-export function applyCodexEngine(cwd, { want = null, apply = true } = {}) {
+// 👥 ONE FILE, MANY AGENTS (GEPPETTO 6.11, reproduced: agent B, its control OFF, «gave back» the baseline and undid agent A's choice in the same
+//    project): the ledger records WHICH agent wrote the value; only that agent's own clear / off gives the prior back. Another agent's choice
+//    overwrites it - the file is the project's, so the last choice wins (Codex has no per-session config file; the menu says «this project»).
+export function applyCodexEngine(cwd, { want = null, apply = true, handle = '' } = {}) {
   if (!cwd) return { changed: false, skipped: 'no project' };
   const file = path.join(cwd, '.codex', 'config.toml'), ledgerFile = path.join(HOME(), 'codex-engine-applied.json');
   let text = ''; try { text = fs.readFileSync(file, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') return { changed: false, skipped: 'unreadable' }; }
@@ -98,8 +112,10 @@ export function applyCodexEngine(cwd, { want = null, apply = true } = {}) {
   for (const key of ['model', 'model_reasoning_effort']) {
     const v = target[key], cur = topGet(lines, key), prior = `prior:${key}`;
     if (v) { if (mine[key] === undefined && cur !== undefined && cur !== v) mine[prior] = cur; if (cur !== v) { lines = topSet(lines, key, v); wrote[key] = v; } mine[key] = v; }
-    else if (mine[key] !== undefined) { if (cur === mine[key]) { lines = topSet(lines, key, mine[prior]); removed.push(key); } delete mine[key]; delete mine[prior]; }
+    else if (mine[key] !== undefined && (!mine.owner || !handle || mine.owner === handle)) { if (cur === mine[key]) { lines = topSet(lines, key, mine[prior]); removed.push(key); } delete mine[key]; delete mine[prior]; }
   }
+  if (Object.keys(wrote).length && handle) mine.owner = handle;
+  if (!Object.keys(mine).some((x) => x !== 'owner')) delete mine.owner;
   const changed = Object.keys(wrote).length > 0 || removed.length > 0;
   if (changed) { fs.mkdirSync(path.dirname(file), { recursive: true }); const tmp = `${file}.${process.pid}.tmp`; fs.writeFileSync(tmp, lines.join(nl)); fs.renameSync(tmp, file); }
   if (JSON.stringify(mine) !== before) { if (Object.keys(mine).length) ledger[file] = mine; else delete ledger[file]; fs.mkdirSync(HOME(), { recursive: true }); fs.writeFileSync(ledgerFile, JSON.stringify(ledger, null, 2)); }
@@ -150,7 +166,7 @@ export function anyKeyOf(env = process.env, home = os.homedir()) {
   return '';
 }
 /** Gemini CLI: the person's model into the project's .gemini/settings.json (model.name) - its value given back on off. */
-export function applyGeminiEngine(cwd, { want = null, apply = true } = {}) {
+export function applyGeminiEngine(cwd, { want = null, apply = true, handle = '' } = {}) {
   if (!cwd) return { changed: false, skipped: 'no project' };
   const file = path.join(cwd, '.gemini', 'settings.json'), ledgerFile = path.join(HOME(), 'gemini-engine-applied.json');
   let j = {}; try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') return { changed: false, skipped: 'not JSON - left as it is' }; }
@@ -158,7 +174,8 @@ export function applyGeminiEngine(cwd, { want = null, apply = true } = {}) {
   const mine = { ...(ledger[file] || {}) }, before = JSON.stringify(ledger[file] || {}), cur = (j.model || {}).name, v = apply && want ? want.model || null : null;
   let changed = false;
   if (v) { if (mine.model === undefined && cur !== undefined && cur !== v) mine['prior:model'] = cur; if (cur !== v) { j.model = { ...(j.model || {}), name: v }; changed = true; } mine.model = v; }
-  else if (mine.model !== undefined) { if (cur === mine.model) { if (mine['prior:model'] !== undefined) j.model.name = mine['prior:model']; else { delete j.model.name; if (!Object.keys(j.model).length) delete j.model; } changed = true; } delete mine.model; delete mine['prior:model']; }
+  else if (mine.model !== undefined && (!mine.owner || !handle || mine.owner === handle)) { if (cur === mine.model) { if (mine['prior:model'] !== undefined) j.model.name = mine['prior:model']; else { delete j.model.name; if (!Object.keys(j.model).length) delete j.model; } changed = true; } delete mine.model; delete mine['prior:model']; }
+  if (v && handle && changed) mine.owner = handle; if (mine.model === undefined) delete mine.owner;
   if (changed) { fs.mkdirSync(path.dirname(file), { recursive: true }); const tmp = `${file}.${process.pid}.tmp`; fs.writeFileSync(tmp, JSON.stringify(j, null, 2)); fs.renameSync(tmp, file); }
   if (JSON.stringify(mine) !== before) { if (Object.keys(mine).length) ledger[file] = mine; else delete ledger[file]; fs.mkdirSync(HOME(), { recursive: true }); fs.writeFileSync(ledgerFile, JSON.stringify(ledger, null, 2)); }
   return { changed };
@@ -184,10 +201,11 @@ export async function onStop(hook = {}, { env = process.env, fetchImpl = fetch, 
   if (host === 'codex') {
     const lines = hook.transcript_path ? tail(hook.transcript_path) : [];
     const s0 = codexStateOf(lines) || {}; room = s0.room; handle = s0.handle;
-    status = codexStatusOf(lines, { model: hook.model || null }); apply = (r) => applyCodexEngine(hook.cwd, r);
+    status = codexStatusOf(lines, { model: hook.model || null }); apply = (r) => applyCodexEngine(hook.cwd, { ...r, handle });
+    const choices = status && codexChoicesOf(env, home); if (choices) status.choices = choices;
   } else if (host === 'gemini') {
     const text = hook.transcript_path ? tail(hook.transcript_path).join('\n') : ''; const s0 = scanJoin(text) || {}; room = s0.room; handle = s0.handle;
-    status = geminiStatusOf(text); apply = (r) => applyGeminiEngine(hook.cwd || env.GEMINI_PROJECT_DIR, r);
+    status = geminiStatusOf(text); apply = (r) => applyGeminiEngine(hook.cwd || env.GEMINI_PROJECT_DIR, { ...r, handle });
   } else if (host === 'antigravity') {
     const text = hook.transcriptPath ? tail(hook.transcriptPath).join('\n') : ''; const s0 = scanJoin(text) || {}; room = s0.room; handle = s0.handle;
     status = hook.modelName ? { model: String(hook.modelName).slice(0, 80), at: new Date().toISOString() } : null;

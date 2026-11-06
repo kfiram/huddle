@@ -195,11 +195,35 @@ export function outOf(hook) {
   if (text.length > OUT_MAX) text = `${text.slice(0, OUT_MAX)}\n… (${text.length - OUT_MAX} more characters)`;
   return { id, text: mask(text).text, ...(failed ? { failed: true } : {}) };
 }
+// 🤖 A HELPER'S OWN STEPS, UNDER THE STEP THAT STARTED IT (transparency (6), in the cloud 6.11): Claude Code keeps each sub-agent in
+//    <session>/subagents/agent-<id>.jsonl, its .meta.json naming the Agent call that started it (toolUseId) - the file a local Huddle reads
+//    (whatsup.mjs subagentOf). Sent when that call ends: its calls (name, a small masked input, its own id - the cloud drops their flat copies
+//    by it), whether each failed, and its answer. → { type, description, calls, answer } or null
+const SUB_INPUT = 2000;
+const small = (v, depth = 0) => { if (typeof v === 'string') return v.length > 300 ? `${v.slice(0, 300)}…` : v; if (depth > 3 || v === null || typeof v !== 'object') return v; if (Array.isArray(v)) return v.slice(0, 20).map((x) => small(x, depth + 1)); const o = {}; for (const [k, x] of Object.entries(v).slice(0, 30)) o[k] = small(x, depth + 1); return o; };
+export function subagentOf(transcriptPath, toolUseId, cwd = '') {
+  if (!transcriptPath || !toolUseId) return null;
+  const dir = path.join(String(transcriptPath).replace(/\.jsonl$/i, ''), 'subagents');
+  let metas = []; try { metas = fs.readdirSync(dir).filter((f) => f.endsWith('.meta.json')); } catch { return null; }
+  for (const mf of metas) {
+    const meta = readJ(path.join(dir, mf)); if (!meta || meta.toolUseId !== toolUseId) continue;
+    let lines = []; try { lines = fs.readFileSync(path.join(dir, mf.replace(/\.meta\.json$/, '.jsonl')), 'utf8').split('\n'); } catch { return null; }
+    const calls = [], bad = new Set(); let answer = '';
+    for (const l of lines) {
+      let j; try { j = JSON.parse(l); } catch { continue; } const c = j && j.message && Array.isArray(j.message.content) ? j.message.content : [];
+      if (j.type === 'assistant') for (const b of c) { if (b && b.type === 'tool_use') { let input = cleanInput(b.input, cwd); input = small(input); if (JSON.stringify(input).length > SUB_INPUT) input = { note: 'too large to show' }; calls.push({ at: j.timestamp || null, id: String(b.id || ''), name: String(b.name || '').slice(0, 120), input }); } else if (b && b.type === 'text' && String(b.text || '').trim()) answer = String(b.text); }
+      if (j.type === 'user') for (const b of c) if (b && b.type === 'tool_result' && b.is_error) bad.add(String(b.tool_use_id || ''));
+    }
+    return { type: String(meta.agentType || 'helper').slice(0, 60), description: mask(String(meta.description || '').slice(0, 200)).text, calls: calls.slice(-200).map((x) => (bad.has(x.id) ? { ...x, failed: true } : x)), total: calls.length, answer: mask(answer.slice(0, 4000)).text };
+  }
+  return null;
+}
 /** The PostToolUse / PostToolUseFailure hook: queue the call's result and its file for the sender (only while the switch is on and the session knows its room). */
 export function recordResult(hook, { spawnFlush = true } = {}) {
   const info = infoOf(hook && hook.session_id); if (!info || !info.on || !info.handle || !info.room) return { ok: true, skipped: 'off or no room' };
   const id = String((hook && hook.tool_use_id) || ''); if (!id) return { ok: true, skipped: 'no call id' };
   const out = outOf(hook); if (out) { fs.mkdirSync(DIR(), { recursive: true }); fs.appendFileSync(spoolF(hook.session_id), JSON.stringify({ type: 'out', ...out }) + '\n'); }
+  if (/^(Agent|Task)$/.test(String(hook.tool_name || ''))) { let sub = null; try { sub = subagentOf(hook.transcript_path, id, hook.cwd); } catch { /* its steps still show flat */ } if (sub) { fs.mkdirSync(DIR(), { recursive: true }); fs.appendFileSync(spoolF(hook.session_id), JSON.stringify({ type: 'sub', id, sub }) + '\n'); } }
   const kick = () => { if (!spawnFlush) return; let busy = false; try { busy = Date.now() - fs.statSync(lockF(hook.session_id)).mtimeMs < 30000; } catch { /* none */ } if (!busy) { const c = spawn(process.execPath, [fileURLToPath(import.meta.url), '--flush', sid(hook.session_id)], { detached: true, stdio: 'ignore', windowsHide: true }); c.unref(); } };
   if (hook.hook_event_name === 'PostToolUseFailure') { kick(); return { ok: true, queued: 'result' }; }
   let local = fileOfCall(String(hook.tool_name || ''), hook.tool_input, hook.cwd), tmp = false;
@@ -241,17 +265,17 @@ export async function flush(session, { ended = false, send = null, transcript = 
   // the turn's end: its last lines (the answer, the thinking before it) - read now, beside whatever steps gathered
   if (transcript) { try { const rd = collectRead(session, transcript, format), add = [...rd.ctx.map((c) => ({ type: 'ctx', ...c })), ...rd.texts.map((t) => ({ type: 'text', ...t }))]; if (add.length) { fs.mkdirSync(DIR(), { recursive: true }); fs.appendFileSync(f, add.map((x) => JSON.stringify(x)).join('\n') + '\n'); } } catch { /* the steps still go */ } }
   try { fs.renameSync(f, taking); items = fs.readFileSync(taking, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { /* nothing gathered */ }
-  const texts = items.filter((x) => x.type === 'text').map(({ type, ...t }) => t).slice(-60), steps = items.filter((x) => x.type !== 'text' && x.type !== 'upload' && x.type !== 'out' && x.type !== 'ctx'), ctx = items.filter((x) => x.type === 'ctx').map(({ type, ...c }) => c).slice(-60), ups = items.filter((x) => x.type === 'upload'), outs = items.filter((x) => x.type === 'out').map(({ type, ...o }) => o).slice(-40);
+  const texts = items.filter((x) => x.type === 'text').map(({ type, ...t }) => t).slice(-60), steps = items.filter((x) => x.type !== 'text' && x.type !== 'upload' && x.type !== 'out' && x.type !== 'ctx' && x.type !== 'sub'), ctx = items.filter((x) => x.type === 'ctx').map(({ type, ...c }) => c).slice(-60), subs = items.filter((x) => x.type === 'sub').map(({ type, ...x }) => x).slice(-10), ups = items.filter((x) => x.type === 'upload'), outs = items.filter((x) => x.type === 'out').map(({ type, ...o }) => o).slice(-40);
   if (!info.on) { for (const u of ups) if (u.tmp) try { fs.unlinkSync(u.local); } catch { /* gone */ } try { fs.unlinkSync(taking); } catch { /* none */ } return { ok: true, sent: 0, off: true }; }
   const results = info.room ? await uploadAll(info.room, ups, { attach }) : [];
   const doSend = send || cloudSend;
   let sent = 0, r = null;
-  const batches = []; for (let i = 0; i < steps.length; i += BATCH) batches.push(steps.slice(i, i + BATCH)); if (!batches.length && (ended || texts.length || results.length || outs.length || ctx.length)) batches.push([]);
+  const batches = []; for (let i = 0; i < steps.length; i += BATCH) batches.push(steps.slice(i, i + BATCH)); if (!batches.length && (ended || texts.length || results.length || outs.length || ctx.length || subs.length)) batches.push([]);
   for (let i = 0; i < batches.length; i++) {
-    const tx = i === 0 ? texts : [], cx = i === 0 ? ctx : [], rs = i === batches.length - 1 ? results : [], os = i === batches.length - 1 ? outs : [];   // the lines ride with the first batch; the files with the last, after their steps
-    try { r = await doSend({ as: info.handle, room: info.room || undefined, turn: info.turn || '', steps: batches[i], ...(tx.length ? { texts: tx } : {}), ...(cx.length ? { ctx: cx } : {}), ...(rs.length ? { results: rs } : {}), ...(os.length ? { outs: os } : {}), ended: ended && i === batches.length - 1 }); } catch (e) { r = { ok: false, problems: [String((e && e.message) || e)] }; }
+    const tx = i === 0 ? texts : [], cx = i === 0 ? ctx : [], rs = i === batches.length - 1 ? results : [], os = i === batches.length - 1 ? outs : [], sb = i === batches.length - 1 ? subs : [];   // the lines ride with the first batch; the files with the last, after their steps
+    try { r = await doSend({ as: info.handle, room: info.room || undefined, turn: info.turn || '', steps: batches[i], ...(tx.length ? { texts: tx } : {}), ...(cx.length ? { ctx: cx } : {}), ...(rs.length ? { results: rs } : {}), ...(os.length ? { outs: os } : {}), ...(sb.length ? { subs: sb } : {}), ended: ended && i === batches.length - 1 }); } catch (e) { r = { ok: false, problems: [String((e && e.message) || e)] }; }
     if (r && r.off) { remember(session, { on: false }); break; }   // switched off in Huddle since: keep nothing, send nothing
-    if (!r || r.ok === false) { const back = [...cx.map((c) => ({ type: 'ctx', ...c })), ...tx.map((t) => ({ type: 'text', ...t })), ...batches.slice(i).flat(), ...outs.map((o) => ({ type: 'out', ...o }))]; if (back.length) fs.appendFileSync(f, back.map((x) => JSON.stringify(x)).join('\n') + '\n'); break; }
+    if (!r || r.ok === false) { const back = [...cx.map((c) => ({ type: 'ctx', ...c })), ...tx.map((t) => ({ type: 'text', ...t })), ...batches.slice(i).flat(), ...outs.map((o) => ({ type: 'out', ...o })), ...subs.map((x) => ({ type: 'sub', ...x }))]; if (back.length) fs.appendFileSync(f, back.map((x) => JSON.stringify(x)).join('\n') + '\n'); break; }
     sent += batches[i].length;
   }
   try { fs.unlinkSync(taking); } catch { /* none */ }
